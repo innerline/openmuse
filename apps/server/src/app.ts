@@ -47,7 +47,11 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({ apiKey: config.intelligenceApiKey });
+  const intelligence = new CopilotKitIntelligence({
+    apiKey: config.intelligenceApiKey,
+    apiUrl: process.env.INTELLIGENCE_API_URL,
+    wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL,
+  });
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
