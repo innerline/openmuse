@@ -19,6 +19,16 @@ import { type OpenAIChatModel, openaiChatCompletions, openaiText } from "@tansta
 import { map, mergeMap, type Observable } from "rxjs";
 import { z } from "zod";
 import { MODEL_MAX_RETRIES } from "../config.ts";
+import { windowHistory, type HistoryMessage } from "./history-window.ts";
+
+// Local models have bounded context windows (oMLX: 256K for Qwen3.8, 1M for
+// GLM-MLX). When a thread's history overflows the high watermark it is cut
+// once, at a user-message boundary, back to the low watermark (see
+// history-window.ts). Between cuts the history is append-only, so oMLX's
+// prefix-cache snapshots stay valid. 0 (the default) disables windowing —
+// deployments opt in per model via env.
+const HISTORY_HIGH_WATERMARK_TOKENS = Number(process.env.HISTORY_HIGH_WATERMARK_TOKENS ?? 0);
+const HISTORY_LOW_WATERMARK_TOKENS = Number(process.env.HISTORY_LOW_WATERMARK_TOKENS ?? 0);
 
 // Same "provider/model" strings, env vars and base URL formats as the AI SDK resolver in
 // @copilotkit/runtime. Each provider SDK retries transient failures up to MODEL_MAX_RETRIES times.
@@ -124,9 +134,21 @@ export function tanstackAgent(options: {
   const agent = new BuiltInAgent({
     type: "tanstack",
     factory: ({ input, abortController }) => {
-      const converted = convertInputToTanStackAI(input);
+      const { messages: windowed, dropped } = windowHistory(
+        input.messages as unknown as HistoryMessage[],
+        HISTORY_HIGH_WATERMARK_TOKENS,
+        HISTORY_LOW_WATERMARK_TOKENS,
+      );
+      const converted = convertInputToTanStackAI(
+        dropped ? { ...input, messages: windowed as unknown as typeof input.messages } : input,
+      );
       // Build the system prompt like the classic mode. It does not forward system messages.
       let system = options.prompt;
+      if (dropped)
+        system +=
+          "\n## Earlier conversation\n" +
+          `${dropped} earlier message(s) were trimmed to fit the model's context window. ` +
+          "The visible history starts mid-thread; work from what remains and say so if asked.\n";
       if (input.context.length) {
         system += "\n## Context from the application\n";
         for (const ctx of input.context) system += `${ctx.description}:\n${ctx.value}\n`;
