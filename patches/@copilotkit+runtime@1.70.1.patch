@@ -1,0 +1,296 @@
+diff --git a/a/dist/v2/runtime/intelligence-platform/client.mjs b/b/dist/v2/runtime/intelligence-platform/client.mjs
+index 03e8a36..734bd2f 100644
+--- a/a/dist/v2/runtime/intelligence-platform/client.mjs
++++ b/b/dist/v2/runtime/intelligence-platform/client.mjs
+@@ -459,7 +459,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async listThreads(params) {
+ 		const query = {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId
+ 		};
+ 		if (params.includeArchived) query.includeArchived = "true";
+@@ -533,7 +533,7 @@ var CopilotKitIntelligence = class {
+ 		}, memoryRequestHeaders(params.userId, params.memoryGrant));
+ 	}
+ 	async ɵsubscribeToThreads(params) {
+-		return this.#request("POST", "/api/threads/subscribe", { userId: params.userId });
++		return this.#request("POST", "/api/threads/subscribe", { endUserId: params.userId });
+ 	}
+ 	/**
+ 	* Mint memory-realtime join credentials (platform `POST
+@@ -565,7 +565,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async updateThread(params) {
+ 		const response = await this.#request("PATCH", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.updates
+ 		});
+@@ -583,8 +583,9 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async createThread(params) {
+ 		const response = await this.#request("POST", `/api/threads`, {
++			tools: [],
+ 			threadId: params.threadId,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.name !== void 0 ? { name: params.name } : {},
+ 			...params.learningContainerId !== void 0 ? { learningContainerId: params.learningContainerId } : {}
+@@ -600,7 +601,7 @@ var CopilotKitIntelligence = class {
+ 	*   not exist.
+ 	*/
+ 	async getThread(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return (await this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}?${qs}`)).thread;
+ 	}
+ 	/**
+@@ -620,30 +621,13 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async getOrCreateThread(params) {
+ 		try {
+-			return {
+-				thread: await this.getThread({
+-					threadId: params.threadId,
+-					userId: params.userId
+-				}),
+-				created: false
+-			};
+-		} catch (error) {
+-			if (!(error instanceof PlatformRequestError && error.status === 404)) throw error;
+-		}
+-		try {
+-			return {
+-				thread: await this.createThread(params),
+-				created: true
+-			};
++			const thread = await this.createThread(params);
++			return { thread, created: true };
+ 		} catch (error) {
+-			if (error instanceof PlatformRequestError && error.status === 409) return {
+-				thread: await this.getThread({
+-					threadId: params.threadId,
+-					userId: params.userId
+-				}),
+-				created: false
+-			};
+-			throw error;
++			if (!(error instanceof PlatformRequestError && error.status === 409)) {
++				throw error;
++			}
++			return { thread: { id: params.threadId, userId: params.userId, agentId: params.agentId }, created: false };
+ 		}
+ 	}
+ 	/**
+@@ -653,7 +637,7 @@ var CopilotKitIntelligence = class {
+ 	* @throws {@link PlatformRequestError} on non-2xx responses.
+ 	*/
+ 	async getThreadMessages(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}/messages?${qs}`, void 0, params.channelDeliveryId ? { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId } : void 0);
+ 	}
+ 	/** @internal Fetches one authorized managed Channel asset for history hydration. */
+@@ -714,7 +698,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async archiveThread(params) {
+ 		const response = await this.#request("PATCH", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			archived: true
+ 		});
+@@ -730,7 +714,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async deleteThread(params) {
+ 		await this.#request("DELETE", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			reason: `Deleted via CopilotKit runtime (userId=${params.userId}, agentId=${params.agentId})`
+ 		});
+@@ -763,7 +747,7 @@ var CopilotKitIntelligence = class {
+ 		const path = `/connector/annotate/${encodeURIComponent(clientEventId)}`;
+ 		const body = {
+ 			type: params.type,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			threadId: params.threadId
+ 		};
+ 		if (params.payload !== void 0) body.payload = params.payload;
+@@ -778,7 +762,7 @@ var CopilotKitIntelligence = class {
+ 	async ɵacquireThreadLock(params) {
+ 		return this.#request("POST", `/api/threads/${encodeURIComponent(params.threadId)}/lock`, {
+ 			runId: params.runId,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.learningContainerId !== void 0 ? { learningContainerId: params.learningContainerId } : {},
+ 			...params.lockKeyPrefix !== void 0 ? { lockKeyPrefix: params.lockKeyPrefix } : {},
+@@ -796,12 +780,12 @@ var CopilotKitIntelligence = class {
+ 		});
+ 	}
+ 	async ɵgetActiveJoinCode(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}/join-code?${qs}`);
+ 	}
+ 	async ɵconnectThread(params) {
+ 		return await this.#request("POST", `/api/threads/${encodeURIComponent(params.threadId)}/connect`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId
+ 		}) ?? null;
+ 	}
+diff --git a/a/dist/v2/runtime/intelligence-platform/client.cjs b/b/dist/v2/runtime/intelligence-platform/client.cjs
+index fea7430..2657c03 100644
+--- a/a/dist/v2/runtime/intelligence-platform/client.cjs
++++ b/b/dist/v2/runtime/intelligence-platform/client.cjs
+@@ -460,7 +460,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async listThreads(params) {
+ 		const query = {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId
+ 		};
+ 		if (params.includeArchived) query.includeArchived = "true";
+@@ -534,7 +534,7 @@ var CopilotKitIntelligence = class {
+ 		}, memoryRequestHeaders(params.userId, params.memoryGrant));
+ 	}
+ 	async ɵsubscribeToThreads(params) {
+-		return this.#request("POST", "/api/threads/subscribe", { userId: params.userId });
++		return this.#request("POST", "/api/threads/subscribe", { endUserId: params.userId });
+ 	}
+ 	/**
+ 	* Mint memory-realtime join credentials (platform `POST
+@@ -566,7 +566,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async updateThread(params) {
+ 		const response = await this.#request("PATCH", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.updates
+ 		});
+@@ -584,8 +584,9 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async createThread(params) {
+ 		const response = await this.#request("POST", `/api/threads`, {
++			tools: [],
+ 			threadId: params.threadId,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.name !== void 0 ? { name: params.name } : {},
+ 			...params.learningContainerId !== void 0 ? { learningContainerId: params.learningContainerId } : {}
+@@ -601,7 +602,7 @@ var CopilotKitIntelligence = class {
+ 	*   not exist.
+ 	*/
+ 	async getThread(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return (await this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}?${qs}`)).thread;
+ 	}
+ 	/**
+@@ -621,30 +622,13 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async getOrCreateThread(params) {
+ 		try {
+-			return {
+-				thread: await this.getThread({
+-					threadId: params.threadId,
+-					userId: params.userId
+-				}),
+-				created: false
+-			};
+-		} catch (error) {
+-			if (!(error instanceof PlatformRequestError && error.status === 404)) throw error;
+-		}
+-		try {
+-			return {
+-				thread: await this.createThread(params),
+-				created: true
+-			};
++			const thread = await this.createThread(params);
++			return { thread, created: true };
+ 		} catch (error) {
+-			if (error instanceof PlatformRequestError && error.status === 409) return {
+-				thread: await this.getThread({
+-					threadId: params.threadId,
+-					userId: params.userId
+-				}),
+-				created: false
+-			};
+-			throw error;
++			if (!(error instanceof PlatformRequestError && error.status === 409)) {
++				throw error;
++			}
++			return { thread: { id: params.threadId, userId: params.userId, agentId: params.agentId }, created: false };
+ 		}
+ 	}
+ 	/**
+@@ -654,7 +638,7 @@ var CopilotKitIntelligence = class {
+ 	* @throws {@link PlatformRequestError} on non-2xx responses.
+ 	*/
+ 	async getThreadMessages(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}/messages?${qs}`, void 0, params.channelDeliveryId ? { "X-Cpki-Channel-Delivery-Id": params.channelDeliveryId } : void 0);
+ 	}
+ 	/** @internal Fetches one authorized managed Channel asset for history hydration. */
+@@ -715,7 +699,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async archiveThread(params) {
+ 		const response = await this.#request("PATCH", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			archived: true
+ 		});
+@@ -731,7 +715,7 @@ var CopilotKitIntelligence = class {
+ 	*/
+ 	async deleteThread(params) {
+ 		await this.#request("DELETE", `/api/threads/${encodeURIComponent(params.threadId)}`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			reason: `Deleted via CopilotKit runtime (userId=${params.userId}, agentId=${params.agentId})`
+ 		});
+@@ -764,7 +748,7 @@ var CopilotKitIntelligence = class {
+ 		const path = `/connector/annotate/${encodeURIComponent(clientEventId)}`;
+ 		const body = {
+ 			type: params.type,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			threadId: params.threadId
+ 		};
+ 		if (params.payload !== void 0) body.payload = params.payload;
+@@ -779,7 +763,7 @@ var CopilotKitIntelligence = class {
+ 	async ɵacquireThreadLock(params) {
+ 		return this.#request("POST", `/api/threads/${encodeURIComponent(params.threadId)}/lock`, {
+ 			runId: params.runId,
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId,
+ 			...params.learningContainerId !== void 0 ? { learningContainerId: params.learningContainerId } : {},
+ 			...params.lockKeyPrefix !== void 0 ? { lockKeyPrefix: params.lockKeyPrefix } : {},
+@@ -797,12 +781,12 @@ var CopilotKitIntelligence = class {
+ 		});
+ 	}
+ 	async ɵgetActiveJoinCode(params) {
+-		const qs = new URLSearchParams({ userId: params.userId }).toString();
++		const qs = new URLSearchParams({ endUserId: params.userId }).toString();
+ 		return this.#request("GET", `/api/threads/${encodeURIComponent(params.threadId)}/join-code?${qs}`);
+ 	}
+ 	async ɵconnectThread(params) {
+ 		return await this.#request("POST", `/api/threads/${encodeURIComponent(params.threadId)}/connect`, {
+-			userId: params.userId,
++			endUserId: params.userId,
+ 			agentId: params.agentId
+ 		}) ?? null;
+ 	}

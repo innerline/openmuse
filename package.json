@@ -57,5 +57,8 @@
     "@types/pg": "^8.15.5",
     "tsx": "^4.20.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "image-size": "2.0.4"
   }
 }
