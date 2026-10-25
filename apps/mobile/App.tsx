@@ -32,7 +32,14 @@ import {
   IdeasScreen,
 } from "./src/agent-ui";
 import { AgentWorkspaceProvider, useAgentWorkspace } from "./src/agent-workspace";
-import { API_URL, createSession, MuseApi } from "./src/api";
+import {
+  API_URL,
+  clearSavedAccessKey,
+  createSession,
+  loadSavedAccessKey,
+  MuseApi,
+  saveAccessKey,
+} from "./src/api";
 import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
@@ -76,22 +83,31 @@ export default function App() {
     setError("");
     try {
       const session = await createSession(key);
+      // Web only: remember the key on this device so reloading the page does
+      // not ask for it again. Native keeps the key in memory only, as before.
+      if (key) saveAccessKey(key);
       setToken(session.token);
     } catch (e) {
+      // Drop a stored key only when the server rejected it — an API restart
+      // or network blip must not make a still-valid key be retyped.
+      const status = (e as Error & { status?: number }).status;
+      if (status === 401 || status === 403) clearSavedAccessKey();
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }, []);
   useEffect(() => {
-    void connect();
+    void connect(loadSavedAccessKey());
   }, [connect]);
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
       {token ? (
         <CopilotKitProvider
-          runtimeUrl={`${API_URL}/api/copilotkit`}
+          // Root-relative when the API URL is ".": CopilotKit resolves its connect
+          // URL through new URL() twice, so a leading "./" doubles the path and 404s.
+          runtimeUrl={`${API_URL}/api/copilotkit`.replace(/^\.\//, "/")}
           headers={{ Authorization: `Bearer ${token}` }}
         >
           <WorkspaceApp token={token} />

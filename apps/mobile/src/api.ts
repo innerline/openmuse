@@ -6,6 +6,45 @@ export const API_URL = (
   (Platform.OS === "android" ? "http://10.0.2.2:8787" : "http://localhost:8787")
 ).replace(/\/$/, "");
 
+// Device persistence for the workspace access key — web builds only. The
+// native apps keep the key in memory for the session, as before. On web the
+// exported bundle reloads on every visit, so without this the live-mode
+// gate re-asks for the key on every page load.
+const ACCESS_KEY_STORAGE = "openmuse.accessKey";
+
+function webStorage(): Storage | undefined {
+  if (Platform.OS !== "web") return undefined;
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadSavedAccessKey(): string | undefined {
+  try {
+    return webStorage()?.getItem(ACCESS_KEY_STORAGE) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveAccessKey(key: string): void {
+  try {
+    webStorage()?.setItem(ACCESS_KEY_STORAGE, key);
+  } catch {
+    // Blocked storage (private mode) just means per-session sign-in, as before.
+  }
+}
+
+export function clearSavedAccessKey(): void {
+  try {
+    webStorage()?.removeItem(ACCESS_KEY_STORAGE);
+  } catch {
+    // Nothing stored behaves the same as cleared.
+  }
+}
+
 export class MuseApi {
   constructor(readonly token: string) {}
   async request<T>(path: string, body?: unknown, method?: string): Promise<T> {

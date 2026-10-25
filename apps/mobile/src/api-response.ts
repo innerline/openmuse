@@ -14,9 +14,11 @@ export async function readApiPayload<T>(response: Response, fallback?: string): 
   if (!response.ok) {
     const error =
       payload && typeof payload === "object" ? (payload as { error?: unknown }).error : undefined;
-    throw new Error(
+    const failure = new Error(
       typeof error === "string" ? error : (fallback ?? `Request failed (${response.status})`),
     );
+    (failure as Error & { status?: number }).status = response.status;
+    throw failure;
   }
   if (payload === undefined)
     throw new Error(`The server returned an unreadable response (${response.status}).`);
