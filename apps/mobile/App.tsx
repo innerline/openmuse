@@ -92,7 +92,12 @@ export default function App() {
       // or network blip must not make a still-valid key be retyped.
       const status = (e as Error & { status?: number }).status;
       if (status === 401 || status === 403) clearSavedAccessKey();
-      setError(e instanceof Error ? e.message : String(e));
+      // The no-key boot probe hitting the live-mode gate is the normal
+      // fresh-device path, not a rejected key — show the plain form. A key
+      // was actually attempted, or the failure is not an auth rejection
+      // (server unreachable), when the error still surfaces.
+      if (key || (status !== 401 && status !== 403))
+        setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
