@@ -2,7 +2,8 @@ import "./config.ts";
 import { randomUUID } from "node:crypto";
 import { MessageSchema } from "@ag-ui/core";
 import { CopilotKitIntelligence } from "@copilotkit/runtime/v2";
-import { Hono } from "hono";
+import { OpenBotAdapter } from "../../../packages/backends/src/openbot.ts";
+import { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { z } from "zod";
@@ -191,6 +192,81 @@ export async function createApp(
     const adapter = workspace.openbotAdapter;
     if (!adapter) return c.json({ error: "OpenBot connection is not enabled." }, 400);
     return c.json(await adapter.snapshot(c.req.param("botId")).catch((e) => ({ error: String(e) })));
+  });
+  // Interaction + file + shell capabilities, proxied one-for-one to the adapter.
+  type OpenBotRouteContext = Context<{ Variables: { owner: string } }>;
+  const openbotBody = async (c: OpenBotRouteContext) =>
+    (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const withAdapter = async (
+    c: OpenBotRouteContext,
+    run: (adapter: OpenBotAdapter) => Promise<unknown>,
+  ): Promise<Response> => {
+    const adapter = workspace.openbotAdapter;
+    if (!adapter) return c.json({ error: "OpenBot connection is not enabled." }, 400);
+    return c.json(await run(adapter).catch((e) => ({ error: String(e) })));
+  };
+  app.post("/api/openbot/computer/:botId/click", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.click(c.req.param("botId"), {
+        ref: String(body.ref ?? ""),
+        snapshotId: Number(body.snapshotId ?? 0),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/type", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.typeText(c.req.param("botId"), {
+        text: String(body.text ?? ""),
+        ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
+        ...(body.snapshotId !== undefined ? { snapshotId: Number(body.snapshotId) } : {}),
+        ...(body.submit !== undefined ? { submit: Boolean(body.submit) } : {}),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/key", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.keyPress(c.req.param("botId"), {
+        key: String(body.key ?? ""),
+        ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
+        ...(body.snapshotId !== undefined ? { snapshotId: Number(body.snapshotId) } : {}),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/scroll", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.scroll(c.req.param("botId"), {
+        ...(body.deltaY !== undefined ? { deltaY: Number(body.deltaY) } : {}),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/exec", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.exec(c.req.param("botId"), {
+        command: String(body.command ?? ""),
+        ...(body.timeoutMs !== undefined ? { timeoutMs: Number(body.timeoutMs) } : {}),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/files/list", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.filesList(c.req.param("botId"), {
+        ...(body.path !== undefined ? { path: String(body.path) } : {}),
+      }));
+  });
+  app.post("/api/openbot/computer/:botId/files/read", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.filesRead(c.req.param("botId"), { path: String(body.path ?? "") }));
+  });
+  app.post("/api/openbot/computer/:botId/files/write", async (c) => {
+    const body = await openbotBody(c);
+    return withAdapter(c, (a) =>
+      a.filesWrite(c.req.param("botId"), {
+        path: String(body.path ?? ""),
+        contents: String(body.contents ?? ""),
+        ...(body.append !== undefined ? { append: Boolean(body.append) } : {}),
+      }));
   });
   app.get("/api/calendars", async (c) => c.json(await workspace.calendars(c.get("owner"))));
   app.get("/api/calendar/events", async (c) => {

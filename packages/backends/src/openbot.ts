@@ -86,6 +86,8 @@ const channelSchema = z.object({
   channel: z.object({ id: nonempty, threadId: nonempty, agentIds: z.array(nonempty).min(1) }),
 });
 const errorSchema = z.object({ error: z.string().optional(), rule: z.string().optional() });
+/** Interaction/file/exec responses vary per operation; only the envelope is asserted. */
+const resultRecord = z.record(z.string(), z.unknown());
 
 export type OpenBotComputerStatus = z.infer<typeof computerStatusSchema>;
 export type OpenBotControl = z.infer<typeof controlSchema>;
@@ -209,6 +211,153 @@ export class OpenBotAdapter {
 
   computerControl(botId: string, signal?: AbortSignal): Promise<OpenBotControl> {
     return this.json(computerPath(botId, "control"), controlSchema, { signal });
+  }
+
+  /** Click a snapshot element. `snapshotId` is the one the element came from. */
+  click(botId: string, input: { ref: string; snapshotId: number }, signal?: AbortSignal) {
+    return this.json(
+      computerPath(botId, "click"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({ ref: input.ref, snapshotId: input.snapshotId }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** Type text, optionally into a snapshot element and optionally submitting. */
+  typeText(
+    botId: string,
+    input: { text: string; ref?: string; snapshotId?: number; submit?: boolean },
+    signal?: AbortSignal,
+  ) {
+    return this.json(
+      computerPath(botId, "type"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          text: input.text,
+          ...(input.ref !== undefined ? { ref: input.ref } : {}),
+          ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+          ...(input.submit !== undefined ? { submit: input.submit } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** Press a key, optionally focused on a snapshot element. */
+  keyPress(
+    botId: string,
+    input: { key: string; ref?: string; snapshotId?: number },
+    signal?: AbortSignal,
+  ) {
+    return this.json(
+      computerPath(botId, "key"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          key: input.key,
+          ...(input.ref !== undefined ? { ref: input.ref } : {}),
+          ...(input.snapshotId !== undefined ? { snapshotId: input.snapshotId } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** Scroll the page by pixels (negative scrolls up). */
+  scroll(botId: string, input: { deltaY?: number }, signal?: AbortSignal) {
+    return this.json(
+      computerPath(botId, "scroll"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(input.deltaY !== undefined ? { deltaY: input.deltaY } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** List a Bot workspace directory (OpenBot's own workspace, not OpenMuse's). */
+  filesList(botId: string, input: { path?: string }, signal?: AbortSignal) {
+    return this.json(
+      computerPath(botId, "files/list"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          ...(input.path !== undefined ? { path: input.path } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** Read a Bot workspace file. */
+  filesRead(botId: string, input: { path: string }, signal?: AbortSignal) {
+    return this.json(
+      computerPath(botId, "files/read"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({ path: input.path }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /** Write (or append to) a Bot workspace file. */
+  filesWrite(
+    botId: string,
+    input: { path: string; contents: string; append?: boolean },
+    signal?: AbortSignal,
+  ) {
+    return this.json(
+      computerPath(botId, "files/write"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          path: input.path,
+          contents: input.contents,
+          ...(input.append !== undefined ? { append: input.append } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
+  }
+
+  /**
+   * Run a shell command on the Bot computer. OpenBot bounds the timeout at
+   * 1,000–600,000 ms; OpenMuse proposals still gate which commands dispatch.
+   */
+  exec(botId: string, input: { command: string; timeoutMs?: number }, signal?: AbortSignal) {
+    return this.json(
+      computerPath(botId, "exec"),
+      resultRecord,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          command: input.command,
+          ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+        }),
+        signal,
+      },
+      true,
+    );
   }
 
   requestControl(botId: string, reason: string, signal?: AbortSignal): Promise<OpenBotControl> {
