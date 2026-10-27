@@ -162,6 +162,36 @@ export async function createApp(
   });
   app.route("/api/agent", agentRoutes(agent));
   app.route("/api/computer", computerRoutes(computer, files));
+  // OpenBot connection: status + proxied computer capabilities (adapter-backed).
+  app.get("/api/openbot/status", async (c) => {
+    const status = await workspace.openbotStatus();
+    const adapter = workspace.openbotAdapter;
+    let capabilities: Record<string, unknown> = {};
+    if (adapter && status === "connected") {
+      const probe = await adapter.probe().catch(() => undefined);
+      if (probe?.state === "authenticated")
+        capabilities = { mode: probe.mode, durableHistory: probe.durableHistory, generativeUi: probe.generativeUi };
+    }
+    return c.json({ status, ...capabilities });
+  });
+  app.get("/api/openbot/computer/:botId/status", async (c) => {
+    const adapter = workspace.openbotAdapter;
+    if (!adapter) return c.json({ error: "OpenBot connection is not enabled." }, 400);
+    return c.json(await adapter.computerStatus(c.req.param("botId")).catch((e) => ({ error: String(e) })));
+  });
+  app.post("/api/openbot/computer/:botId/navigate", async (c) => {
+    const adapter = workspace.openbotAdapter;
+    if (!adapter) return c.json({ error: "OpenBot connection is not enabled." }, 400);
+    const body = await c.req.json().catch(() => ({}));
+    return c.json(await adapter
+      .navigate(c.req.param("botId"), { url: body.url })
+      .catch((e) => ({ error: String(e) })));
+  });
+  app.post("/api/openbot/computer/:botId/snapshot", async (c) => {
+    const adapter = workspace.openbotAdapter;
+    if (!adapter) return c.json({ error: "OpenBot connection is not enabled." }, 400);
+    return c.json(await adapter.snapshot(c.req.param("botId")).catch((e) => ({ error: String(e) })));
+  });
   app.get("/api/calendars", async (c) => c.json(await workspace.calendars(c.get("owner"))));
   app.get("/api/calendar/events", async (c) => {
     const query = z
@@ -352,7 +382,7 @@ export async function createApp(
     return new Response(body, { status: response.status, headers: response.headers });
   });
   app.get("/", (c) =>
-    c.json({ name: "OpenMuse", app: "http://localhost:8081", health: "/api/health" }),
+    c.json({ name: "OpenMuse", app: "http://localhost:8082", health: "/api/health" }),
   );
   return { app, auth, files, actions, workspace, agent, computer };
 }

@@ -43,6 +43,10 @@ export interface Config {
   agentBackend: "sample" | "model" | "agui";
   agentUrl?: string;
   agentToken?: string;
+  openbotEnabled?: boolean;
+  openbotBaseUrl?: string;
+  openbotRuntimePath?: string;
+  openbotAgentId?: string;
   intelligenceApiKey?: string;
   googleClientId?: string;
   googleClientSecret?: string;
@@ -149,6 +153,10 @@ export function readConfig(): Config {
     agentBackend: backend,
     agentUrl: process.env.AGENT_URL,
     agentToken: process.env.AGENT_TOKEN,
+    openbotEnabled: process.env.OPENBOT_ENABLED === "true",
+    openbotBaseUrl: process.env.OPENBOT_BASE_URL?.trim() || undefined,
+    openbotRuntimePath: process.env.OPENBOT_RUNTIME_PATH?.trim() || "/api/copilotkit",
+    openbotAgentId: process.env.OPENBOT_AGENT_ID?.trim() || undefined,
     intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,

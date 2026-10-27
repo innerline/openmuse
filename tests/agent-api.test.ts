@@ -42,6 +42,8 @@ before(async () => {
     publicUrl: "http://localhost:8787",
     dataDir: directory,
     agentBackend: "model",
+    openbotEnabled: false,
+    openbotRuntimePath: "/api/copilotkit",
     intelligenceApiKey: "test-project-key-never-sent",
     googleRedirectUri: "http://localhost:8787/api/google/callback",
     allowedOrigins: ["http://localhost:8081"],

@@ -15,6 +15,11 @@ import { createSamplePdf } from "../../../packages/integrations/src/pdf.ts";
 import type { ActionService } from "./actions.ts";
 import { agentConfigured } from "./agent.ts";
 import type { Config } from "./config.ts";
+import {
+  createOpenBotConnection,
+  OpenBotConnection,
+  type OpenBotConnectionStatus,
+} from "./openbot-connection.ts";
 import type { Store } from "./db.ts";
 import { AppError } from "./errors.ts";
 import type { Files } from "./files.ts";
@@ -22,12 +27,15 @@ import type { GoogleAuth } from "./google-auth.ts";
 
 export class WorkspaceService {
   private seeding = new Map<string, Promise<void>>();
+  private openbot: OpenBotConnection;
   constructor(
     private readonly db: Store,
     private readonly config: Config,
     private readonly files: Files,
     private readonly googleAuth: GoogleAuth,
-  ) {}
+  ) {
+    this.openbot = createOpenBotConnection(config);
+  }
   google(owner: string, connectionId?: string) {
     return new GoogleClient({
       getAccessToken: () => this.googleAuth.accessToken(owner, connectionId),
@@ -318,7 +326,20 @@ export class WorkspaceService {
     return { mail, events, connected };
   }
 
+  openbotStatus(): Promise<OpenBotConnectionStatus> {
+    return this.openbot.status();
+  }
+
+  /** The OpenBot adapter for the /api/openbot capability routes (undefined when disabled). */
+  get openbotAdapter(): OpenBotConnection["adapter"] {
+    return this.openbot.adapter;
+  }
+
   async snapshot(owner: string, query?: string): Promise<Workspace> {
+    // "disabled" folds into "unconfigured": the UI's connector vocabulary has no disabled state.
+    const probed = await this.openbot.status();
+    const openbotStatus: "unconfigured" | "connected" | "unavailable" =
+      probed === "connected" ? "connected" : probed === "unavailable" ? "unavailable" : "unconfigured";
     const { mail, events, connected } = await this.sourceSections(owner, true, true, query);
     const tokens = this.config.mode === "live" ? await this.googleAuth.tokens(owner) : null;
     return {
@@ -356,14 +377,14 @@ export class WorkspaceService {
         {
           id: "openbot",
           name: "OpenBot",
-          status: "unconfigured",
+          status: openbotStatus,
           capabilities: ["Integration adapter available"],
         },
       ],
       runtime: {
         provider: this.config.agentBackend === "sample" ? "sample" : "model",
         configured: agentConfigured(this.config),
-        openbotConfigured: false,
+        openbotConfigured: openbotStatus === "connected",
         richThreads: true,
       },
     };
