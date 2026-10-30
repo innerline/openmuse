@@ -76,6 +76,18 @@ export const intelligenceKeyRequiredMessage =
   "then set the generated server-only key. " +
   "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
 
+/**
+ * The partial-set law, shared with the URL and gateway checks below: a deployment that sets SOME
+ * of the Intelligence contract and not all of it meant to configure the platform thread store and
+ * got it wrong, so it refuses to start rather than silently serving without durable threads.
+ * (2026-10-30: OpenMuse also runs fully without Intelligence — the open-source runtime mode —
+ * which is what an empty contract now selects. See agent.ts makeRuntime.)
+ */
+export const intelligencePartialSetMessage =
+  "Intelligence is half-configured: CPK_INTELLIGENCE_API_KEY, INTELLIGENCE_API_URL and " +
+  "INTELLIGENCE_GATEWAY_WS_URL must be set together, or all left unset to run on the " +
+  "open-source runtime without the Intelligence platform.";
+
 export function required(name: string, message: string, value = process.env[name]): string {
   if (!value?.trim()) throw new Error(message);
   return value.trim();
@@ -83,12 +95,16 @@ export function required(name: string, message: string, value = process.env[name
 
 export function assertApiDeploymentConfig(
   config: Config,
-): asserts config is Config & { intelligenceApiKey: string } {
-  required(
-    "CPK_INTELLIGENCE_API_KEY",
-    intelligenceKeyRequiredMessage,
-    config.intelligenceApiKey ?? "",
-  );
+): asserts config is Config & { intelligenceApiKey: string | undefined } {
+  const key = config.intelligenceApiKey?.trim() ?? "";
+  const url = process.env.INTELLIGENCE_API_URL?.trim() ?? "";
+  const gateway = process.env.INTELLIGENCE_GATEWAY_WS_URL?.trim() ?? "";
+  // All three unset = open-source runtime mode: no Intelligence platform, no license, no
+  // vendor check-in. The runtime serves AG-UI streams itself and threads live client-side.
+  if (!key && !url && !gateway) return;
+  // Any of them set = Intelligence mode, and then the whole contract must be present.
+  if (!key || !url || !gateway) throw new Error(intelligencePartialSetMessage);
+  required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage, key);
 }
 
 /** Accept a full worker URL, or host:port from a platform that omits the scheme. */
@@ -157,7 +173,7 @@ export function readConfig(): Config {
     openbotBaseUrl: process.env.OPENBOT_BASE_URL?.trim() || undefined,
     openbotRuntimePath: process.env.OPENBOT_RUNTIME_PATH?.trim() || "/api/copilotkit",
     openbotAgentId: process.env.OPENBOT_AGENT_ID?.trim() || undefined,
-    intelligenceApiKey: required("CPK_INTELLIGENCE_API_KEY", intelligenceKeyRequiredMessage),
+    intelligenceApiKey: process.env.CPK_INTELLIGENCE_API_KEY?.trim() || undefined,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: `${publicUrl}/api/google/callback`,

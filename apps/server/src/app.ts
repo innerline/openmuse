@@ -48,11 +48,23 @@ export async function createApp(
   const browser = new BrowserService(db, config, auth, files);
   const computer = new ComputerService(db, config, options.docker);
   const agent = new AgentService(db, config, workspace, files, actions, browser, computer);
-  const intelligence = new CopilotKitIntelligence({
-    apiKey: config.intelligenceApiKey,
-    apiUrl: process.env.INTELLIGENCE_API_URL,
-    wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL,
-  });
+  /*
+   * The Intelligence platform client, or none. All three env values unset (checked together in
+   * assertApiDeploymentConfig) selects the open-source runtime mode: no platform thread store,
+   * no license token, no vendor check-in — runs stream AG-UI events over the HTTP response and
+   * threads live client-side. 2026-10-30 license-removal cutover (MWP card
+   * kanban/copilotkit-license-removal.md).
+   */
+  const intelligence =
+    config.intelligenceApiKey &&
+    process.env.INTELLIGENCE_API_URL &&
+    process.env.INTELLIGENCE_GATEWAY_WS_URL
+      ? new CopilotKitIntelligence({
+          apiKey: config.intelligenceApiKey,
+          apiUrl: process.env.INTELLIGENCE_API_URL,
+          wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL,
+        })
+      : undefined;
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
   const origins = new Set([...config.allowedOrigins, new URL(config.publicUrl).origin]);
@@ -324,17 +336,22 @@ export async function createApp(
     });
     const main = await db.get<{ threadId: string }>(owner, "conversation-settings", "main");
     if (!main) throw new AppError("Main conversation could not be loaded", 503);
-    try {
-      await intelligence.getOrCreateThread({
-        threadId: main.threadId,
-        userId: owner,
-        agentId: "default",
-      });
-    } catch {
-      throw new AppError(
-        "Main conversation is unavailable. Check the Rich Threads connection and try again.",
-        502,
-      );
+    // Warming the platform thread is an Intelligence-mode courtesy (it creates the thread before
+    // the first run does). In open-source runtime mode there is no platform thread store: the
+    // thread id is the caller's and needs no creating, so the route answers without it.
+    if (intelligence) {
+      try {
+        await intelligence.getOrCreateThread({
+          threadId: main.threadId,
+          userId: owner,
+          agentId: "default",
+        });
+      } catch {
+        throw new AppError(
+          "Main conversation is unavailable. Check the Rich Threads connection and try again.",
+          502,
+        );
+      }
     }
     return c.json({ threadId: main.threadId, existing: true });
   });

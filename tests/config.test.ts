@@ -4,6 +4,7 @@ import {
   assertApiDeploymentConfig,
   browserWorkerUrl,
   type Config,
+  intelligencePartialSetMessage,
   readConfig,
   shadowedEnvKeys,
 } from "../apps/server/src/config.ts";
@@ -28,29 +29,56 @@ function liveConfig(intelligenceApiKey?: string): Config {
   };
 }
 
-const missingKeyMessage =
-  "OpenMuse requires CPK_INTELLIGENCE_API_KEY. " +
-  "Run `npx copilotkit@latest login` and `npx copilotkit@latest project select`, " +
-  "then set the generated server-only key. " +
-  "See https://docs.copilotkit.ai/intelligence/connect-your-runtime";
-
-test("every API mode rejects a missing or blank Intelligence key", () => {
+test("an empty Intelligence contract selects the open-source runtime mode", () => {
+  // The 2026-10-30 license-removal cutover: no key, no API URL, no gateway means the deployment
+  // runs on the open-source CopilotKit runtime with no Intelligence platform and no license.
+  const previous = { ...process.env };
+  delete process.env.INTELLIGENCE_API_URL;
+  delete process.env.INTELLIGENCE_GATEWAY_WS_URL;
   for (const mode of [sampleConfig, liveConfig()]) {
     for (const key of [undefined, "", " \t\n"]) {
-      assert.throws(() => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }), {
-        name: "Error",
-        message: missingKeyMessage,
-      });
+      assert.doesNotThrow(() =>
+        assertApiDeploymentConfig({ ...mode, intelligenceApiKey: key }),
+      );
     }
   }
+  process.env = previous;
 });
 
-test("every API mode accepts a non-empty Intelligence key", () => {
+test("a half-set Intelligence contract is refused in every API mode", () => {
+  const previous = { ...process.env };
+  delete process.env.INTELLIGENCE_API_URL;
+  delete process.env.INTELLIGENCE_GATEWAY_WS_URL;
+  // A key with no platform addressing is the dangerous partial shape: somebody meant to
+  // configure the platform thread store and got it wrong.
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.throws(
+      () => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key" }),
+      { name: "Error", message: intelligencePartialSetMessage },
+    );
+  }
+  // And the mirror shape: addressing with no key.
+  process.env.INTELLIGENCE_API_URL = "http://localhost:51410";
+  process.env.INTELLIGENCE_GATEWAY_WS_URL = "ws://localhost:51412";
+  for (const mode of [sampleConfig, liveConfig()]) {
+    assert.throws(
+      () => assertApiDeploymentConfig({ ...mode, intelligenceApiKey: undefined }),
+      { name: "Error", message: intelligencePartialSetMessage },
+    );
+  }
+  process.env = previous;
+});
+
+test("every API mode accepts a complete Intelligence contract", () => {
+  const previous = { ...process.env };
+  process.env.INTELLIGENCE_API_URL = "http://localhost:51410";
+  process.env.INTELLIGENCE_GATEWAY_WS_URL = "ws://localhost:51412";
   for (const mode of [sampleConfig, liveConfig()]) {
     assert.doesNotThrow(() =>
       assertApiDeploymentConfig({ ...mode, intelligenceApiKey: "test-project-key-never-sent" }),
     );
   }
+  process.env = previous;
 });
 
 test("web search is enabled by default with an explicit opt-out", (t) => {
