@@ -245,6 +245,20 @@ server.on("upgrade", (req, socket, head) => {
   socket.destroy();
 });
 
+// A client that vanishes mid-request (phone sleeping, tailnet re-key, app
+// switched away) must never take the door down with it. Owner hit exactly
+// this 2026-10-30 ~18:13Z: one ECONNRESET on a client socket crashed the
+// process (unhandled 'error' on Socket, syscall 'read') between his taps
+// and our probes — the door answered for agents and was dead for the human.
+// Drop the dying socket, keep serving.
+server.on("connection", (socket) => {
+  socket.on("error", () => socket.destroy());
+});
+server.on("clientError", (err, socket) => {
+  if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
+  else socket.destroy();
+});
+
 server.listen(PORT, HOST, () => {
   log("info", "listening", { host: HOST, port: PORT, webRoot: WEB_ROOT, upstream: API_UPSTREAM });
 });
