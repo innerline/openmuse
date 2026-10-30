@@ -13,6 +13,8 @@
 //   OM_API_UPSTREAM    API origin to proxy /api/* to (default: http://127.0.0.1:8787)
 //   OM_GATEWAY_UPSTREAM  origin of the CopilotKit realtime gateway WebSocket,
 //                        proxied same-origin at /gateway/* (default: ws://127.0.0.1:51412)
+//   OM_INBOX_JSON      owner inbox JSON served at /kanban/owner-inbox.json
+//                      (default: the sibling MWP vault's kanban/owner-inbox.json)
 //   OM_PORT            listen port (default: 8082)
 //   OM_HOST            bind address (default: 0.0.0.0)
 
@@ -37,6 +39,14 @@ const upstream = new URL(API_UPSTREAM);
 // tunnels the WebSocket upgrade to the loopback gateway (2026-10-26 fix).
 const GATEWAY_UPSTREAM = new URL(process.env.OM_GATEWAY_UPSTREAM ?? "ws://127.0.0.1:51412");
 const GATEWAY_PREFIX = "/gateway/";
+
+// The owner inbox (Brian's ask register) lives in the MWP vault and is
+// updated by agents without any web rebuild, so it is read from disk at
+// request time and served no-store rather than baked into the export.
+const INBOX_PATH = "/kanban/owner-inbox.json";
+const INBOX_JSON = path.resolve(
+  process.env.OM_INBOX_JSON ?? path.join(here, "..", "..", "MWP", "kanban", "owner-inbox.json"),
+);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -64,14 +74,14 @@ function log(level, event, detail = {}) {
   else console.log(line);
 }
 
-function serveFile(res, filePath, status = 200) {
+function serveFile(res, filePath, status = 200, cacheControl) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] ?? "application/octet-stream";
   const { size } = statSync(filePath);
   res.writeHead(status, {
     "Content-Type": type,
     "Content-Length": size,
-    "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=300",
+    "Cache-Control": cacheControl ?? (ext === ".html" ? "no-store" : "public, max-age=300"),
   });
   createReadStream(filePath).pipe(res);
 }
@@ -210,6 +220,15 @@ const server = http.createServer((req, res) => {
   if (pathname === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "openmuse-web", upstream: API_UPSTREAM }));
+    return;
+  }
+  if (pathname === INBOX_PATH) {
+    if (!existsSync(INBOX_JSON)) {
+      res.writeHead(404, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ error: "Owner inbox file is missing" }));
+      return;
+    }
+    serveFile(res, INBOX_JSON, 200, "no-store");
     return;
   }
   serveStatic(req, res, pathname);
