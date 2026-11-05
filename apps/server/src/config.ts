@@ -172,6 +172,17 @@ export const LOCK_WAIT_BUDGET_MS = intFromEnv(
  */
 export const LOCK_RETRY_FIRST_DELAYS_MS = [4_000, 8_000] as const;
 export const LOCK_RETRY_STEADY_DELAY_MS = 15_000;
+/*
+ * Renew-retry for transient socket failures on the heartbeat fetch — see
+ * lock-renew-retry.ts. Every attempt must land well inside one TTL window.
+ */
+export const LOCK_RENEW_RETRIES = intFromEnv("MUSE_LOCK_RENEW_RETRIES", 3, 1, 10);
+export const LOCK_RENEW_RETRY_DELAY_MS = intFromEnv(
+  "MUSE_LOCK_RENEW_RETRY_DELAY_MS",
+  2_000,
+  100,
+  30_000,
+);
 
 /**
  * The delay before lock-retry `attempt` (0-based) given `waitedMs` already spent

@@ -3,12 +3,14 @@ import { test } from "node:test";
 import {
   intFromEnv,
   LOCK_HEARTBEAT_SECONDS,
+  LOCK_RENEW_RETRIES,
   LOCK_RETRY_FIRST_DELAYS_MS,
   LOCK_RETRY_STEADY_DELAY_MS,
   LOCK_TTL_SECONDS,
   LOCK_WAIT_BUDGET_MS,
   lockRetryDelayMs,
 } from "../apps/server/src/config.ts";
+import { withLockRenewRetry } from "../apps/server/src/lock-renew-retry.ts";
 
 /*
  * 2026-11-05 isolation board (door-larry lane, 11/12 turns dropped): the door's lock
@@ -62,4 +64,35 @@ test("lock retries start fast, then wait steadily for as long as the budget hold
     null,
   );
   assert.equal(lockRetryDelayMs(99, LOCK_WAIT_BUDGET_MS), null);
+});
+
+test("a transient renew failure is retried and never reaches the runtime's abort", async () => {
+  const calls: string[] = [];
+  let failuresLeft = 2;
+  const intelligence = {
+    ɵrenewThreadLock: async (input: { threadId: string; runId: string; ttlSeconds: number }) => {
+      calls.push(input.threadId);
+      if (failuresLeft-- > 0) throw new Error("fetch failed (socket race)");
+      return { renewed: true };
+    },
+  } as unknown as Parameters<typeof withLockRenewRetry>[0];
+  const wrapped = withLockRenewRetry(intelligence);
+  await wrapped.ɵrenewThreadLock({ threadId: "t1", runId: "r1", ttlSeconds: 300 });
+  assert.deepEqual(calls, ["t1", "t1", "t1"]);
+});
+
+test("a persistently failing renew still rejects after the configured attempts", async () => {
+  let calls = 0;
+  const intelligence = {
+    ɵrenewThreadLock: async () => {
+      calls++;
+      throw new Error("gateway unreachable");
+    },
+  } as unknown as Parameters<typeof withLockRenewRetry>[0];
+  const wrapped = withLockRenewRetry(intelligence);
+  await assert.rejects(
+    wrapped.ɵrenewThreadLock({ threadId: "t2", runId: "r2", ttlSeconds: 300 }),
+    /gateway unreachable/,
+  );
+  assert.equal(calls, LOCK_RENEW_RETRIES);
 });

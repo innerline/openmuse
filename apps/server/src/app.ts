@@ -26,6 +26,7 @@ import { AgentService } from "./engine/service.ts";
 import { AppError } from "./errors.ts";
 import { Files } from "./files.ts";
 import { GoogleAuth } from "./google-auth.ts";
+import { withLockRenewRetry } from "./lock-renew-retry.ts";
 import { rateLimit } from "./rate-limit.ts";
 import { WorkspaceService } from "./workspace.ts";
 
@@ -60,11 +61,13 @@ export async function createApp(
     config.intelligenceApiKey &&
     process.env.INTELLIGENCE_API_URL &&
     process.env.INTELLIGENCE_GATEWAY_WS_URL
-      ? new CopilotKitIntelligence({
-          apiKey: config.intelligenceApiKey,
-          apiUrl: process.env.INTELLIGENCE_API_URL,
-          wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL,
-        })
+      ? withLockRenewRetry(
+          new CopilotKitIntelligence({
+            apiKey: config.intelligenceApiKey,
+            apiUrl: process.env.INTELLIGENCE_API_URL,
+            wsUrl: process.env.INTELLIGENCE_GATEWAY_WS_URL,
+          }),
+        )
       : undefined;
   const runtime = makeRuntime(config, agent, auth, intelligence);
   const app = new Hono<{ Variables: { owner: string } }>();
