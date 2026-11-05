@@ -7,7 +7,11 @@ import {
   createCopilotHonoHandler,
 } from "@copilotkit/runtime/v2";
 import type { Auth } from "./auth.ts";
-import type { Config } from "./config.ts";
+import {
+  LOCK_HEARTBEAT_SECONDS,
+  LOCK_TTL_SECONDS,
+  type Config,
+} from "./config.ts";
 import { ConversationAgent } from "./engine/conversation.ts";
 import type { AgentService } from "./engine/service.ts";
 import { createJevAdapter, type JevAdapter } from "./jev/adapter.ts";
@@ -66,10 +70,15 @@ export function makeRuntime(
   // keyed on the PRESENCE of `intelligence` (platform mode vs open-source mode), and a spread of
   // `...(intelligence ? { intelligence } : {})` widens the property to `| undefined`, which
   // matches neither overload. Naming the two modes lets the compiler check each against its own.
+  // The lock pacing is shared by both: on the local-model lane a loaded turn runs minutes, and
+  // the runtime defaults (TTL 20s, heartbeat 15s) abort the run on a single missed heartbeat —
+  // see the sizing note in config.ts.
   const runtime = intelligence
     ? new CopilotRuntime({
         agents,
         intelligence,
+        lockTtlSeconds: LOCK_TTL_SECONDS,
+        lockHeartbeatIntervalSeconds: LOCK_HEARTBEAT_SECONDS,
         // The shared CopilotKit sink carries this tag onto existing PostHog events.
         telemetryProperties: { accessibility_title: "OpenMuse" },
         identifyUser: async (request) => ({
@@ -80,6 +89,8 @@ export function makeRuntime(
       })
     : new CopilotRuntime({
         agents,
+        lockTtlSeconds: LOCK_TTL_SECONDS,
+        lockHeartbeatIntervalSeconds: LOCK_HEARTBEAT_SECONDS,
         telemetryProperties: { accessibility_title: "OpenMuse" },
         identifyUser: async (request: Request) => ({
           id: await auth.owner(request.headers.get("authorization") ?? undefined),

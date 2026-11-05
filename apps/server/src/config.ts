@@ -122,6 +122,69 @@ export function browserWorkerUrl(value?: string): string | undefined {
 // writes never re-fire here: they are dispatched outside the model loop through
 // reviewed, idempotency-keyed actions.
 export const MODEL_MAX_RETRIES = 2;
+
+/** An integer env var read once at startup: out-of-range or unparsable falls back. */
+export function intFromEnv(
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+/*
+ * Thread-lock pacing for the local-model lane. The runtime's defaults (TTL 20s, heartbeat
+ * 15s) are sized for cloud-model turn times; a loaded local turn runs minutes, and one
+ * transient heartbeat miss inside that 20s window aborts the live run mid-stream — the
+ * "reply cut while the agent was still working" signature on this door. Renew
+ * comfortably inside the TTL instead: a missed heartbeat (a gateway hiccup) costs one
+ * 60s interval and is absorbed, while a lock abandoned by a crashed server still expires
+ * within the TTL. Env-tunable because loaded-turn times are a property of the engine,
+ * not of this app.
+ */
+export const LOCK_TTL_SECONDS = intFromEnv("MUSE_LOCK_TTL_SECONDS", 300, 5, 3600);
+export const LOCK_HEARTBEAT_SECONDS = intFromEnv(
+  "MUSE_LOCK_HEARTBEAT_SECONDS",
+  60,
+  1,
+  3600,
+);
+/*
+ * How long the door waits out a thread whose previous run is still executing, before the
+ * 409 surfaces to the caller. Sized to outlive a LOADED turn (minutes on the local
+ * engine), not an abandoned lock's TTL — the run in front holds its lock for as long as
+ * it is alive. See the retry loop in app.ts.
+ */
+export const LOCK_WAIT_BUDGET_MS = intFromEnv(
+  "MUSE_LOCK_WAIT_BUDGET_MS",
+  600_000,
+  24_000,
+  3_600_000,
+);
+/*
+ * The retry cadence the door paces those waits with: the first attempts are quick (they
+ * cover a just-finished turn), then a steady interval for as long as the budget holds.
+ */
+export const LOCK_RETRY_FIRST_DELAYS_MS = [4_000, 8_000] as const;
+export const LOCK_RETRY_STEADY_DELAY_MS = 15_000;
+
+/**
+ * The delay before lock-retry `attempt` (0-based) given `waitedMs` already spent
+ * waiting, or null when the budget is spent and the 409 should surface to the caller.
+ */
+export function lockRetryDelayMs(attempt: number, waitedMs: number): number | null {
+  if (attempt < LOCK_RETRY_FIRST_DELAYS_MS.length)
+    return LOCK_RETRY_FIRST_DELAYS_MS[attempt];
+  return waitedMs + LOCK_RETRY_STEADY_DELAY_MS <= LOCK_WAIT_BUDGET_MS
+    ? LOCK_RETRY_STEADY_DELAY_MS
+    : null;
+}
+
 export function readConfig(): Config {
   const mode = process.env.WORKSPACE_MODE ?? "sample";
   if (mode !== "sample" && mode !== "live")

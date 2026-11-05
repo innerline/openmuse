@@ -19,6 +19,7 @@ import { BrowserService } from "./browser.ts";
 import { ComputerService, type DockerRunner } from "./computer.ts";
 import { computerRoutes } from "./computer-routes.ts";
 import { assertApiDeploymentConfig, type Config } from "./config.ts";
+import { lockRetryDelayMs } from "./config.ts";
 import type { Store } from "./db.ts";
 import { agentRoutes } from "./engine/routes.ts";
 import { AgentService } from "./engine/service.ts";
@@ -463,23 +464,28 @@ export async function createApp(
         503,
       );
     /*
-     * A run on a thread whose previous run is still executing is a lock conflict the platform
-     * marks retryable — the owner's follow-up sent while the last turn is still streaming
-     * (easy when the realtime socket dropped and the tab shows no activity). Answering 409
-     * outright reads on the door as "Larry is broken"; waiting out the running turn instead
-     * serializes the conversation, which is what a thread is. The runtime's lock TTL (20s)
-     * bounds the worst case, so three waits cover an abandoned lock too.
+     * A run on a thread whose previous run is still executing is a lock conflict the
+     * platform marks retryable — the owner's follow-up sent while the last turn is still
+     * streaming (easy when the realtime socket dropped and the tab shows no activity).
+     * Answering 409 outright reads on the door as "the agent is broken"; waiting out the
+     * running turn instead serializes the conversation, which is what a thread is. The
+     * previous fixed waits (4+8+12s = 24s) were sized to an abandoned lock's TTL; a LIVE
+     * turn on the local engine holds its lock for minutes under load, so the wait now
+     * runs quick first retries and then a steady interval under a budget that outlives a
+     * loaded turn (LOCK_WAIT_BUDGET_MS) instead of expiring into the owner's face.
      */
-    const LOCK_RETRY_DELAYS_MS = [4000, 8000, 12000];
     const retryBody = c.req.raw.clone();
     let response = await runtime.fetch(c.req.raw);
-    for (const delay of LOCK_RETRY_DELAYS_MS) {
+    const lockWaitStartedAt = Date.now();
+    for (let attempt = 0; ; attempt++) {
       if (response.status !== 409) break;
       const text = await response.text();
       if (!text.includes("Thread lock denied")) {
         response = new Response(text, { status: 409, headers: response.headers });
         break;
       }
+      const delay = lockRetryDelayMs(attempt, Date.now() - lockWaitStartedAt);
+      if (delay === null) break;
       await new Promise((resolve) => setTimeout(resolve, delay));
       response = await runtime.fetch(retryBody.clone());
     }
