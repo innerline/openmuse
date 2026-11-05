@@ -41,6 +41,14 @@ import {
   MuseApi,
   saveAccessKey,
 } from "./src/api";
+
+// The door's web build serves same-origin ("." API base). That is correct for requests but
+// renders as a bare "." in the sign-in copy, which reads as a broken blank. Show the door's
+// own address instead — the thing a person would actually type or recognize.
+const serverDisplayUrl =
+  API_URL === "." && typeof window !== "undefined" && window.location
+    ? window.location.origin
+    : API_URL;
 import { ChatScreen, WorkspaceTools } from "./src/chat";
 import { ComputerEntry } from "./src/computer";
 import { ComputerDraftProvider } from "./src/computer-drafts";
@@ -156,7 +164,7 @@ export default function App() {
                 </Button>
                 <Text style={[s.small, { marginTop: 15 }]}>
                   Local workspaces open without a key. Make sure your OpenMuse server is running at{" "}
-                  {API_URL}.
+                  {serverDisplayUrl}.
                 </Text>
               </Card>
             )}

@@ -462,7 +462,27 @@ export async function createApp(
         "Configure a model and provider API key, or a valid AG-UI endpoint, to start chat",
         503,
       );
-    const response = await runtime.fetch(c.req.raw);
+    /*
+     * A run on a thread whose previous run is still executing is a lock conflict the platform
+     * marks retryable — the owner's follow-up sent while the last turn is still streaming
+     * (easy when the realtime socket dropped and the tab shows no activity). Answering 409
+     * outright reads on the door as "Larry is broken"; waiting out the running turn instead
+     * serializes the conversation, which is what a thread is. The runtime's lock TTL (20s)
+     * bounds the worst case, so three waits cover an abandoned lock too.
+     */
+    const LOCK_RETRY_DELAYS_MS = [4000, 8000, 12000];
+    const retryBody = c.req.raw.clone();
+    let response = await runtime.fetch(c.req.raw);
+    for (const delay of LOCK_RETRY_DELAYS_MS) {
+      if (response.status !== 409) break;
+      const text = await response.text();
+      if (!text.includes("Thread lock denied")) {
+        response = new Response(text, { status: 409, headers: response.headers });
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      response = await runtime.fetch(retryBody.clone());
+    }
     // Runtime 1.70 emits SSE strings; a WHATWG Response body requires byte chunks.
     const encoder = new TextEncoder();
     const body = response.body?.pipeThrough(
